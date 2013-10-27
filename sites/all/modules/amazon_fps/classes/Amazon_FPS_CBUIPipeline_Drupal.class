@@ -1,0 +1,111 @@
+<?php
+require_once('Amazon/CBUI/CBUIPipeline.php');
+
+/**
+ * The point of this class is to allow changing the CBUI URL.
+ *   For some reason, the base class doesn't allow this despite defining
+ *   CBUI_URL as protected (not private).
+ * @uses Amazon_FPS_CBUIPipeline
+ */
+class Amazon_FPS_CBUIPipeline_Drupal extends Amazon_FPS_CBUIPipeline {
+  // Redefined protected parameters and methods
+  // are based on Amazon_FPS_CBUIPipeline 2010-08-28
+  protected $parameters = array();
+
+  function Amazon_FPS_CBUIPipeline_Drupal($pipelineName, $awsAccessKey, $awsSecretKey) {
+    parent::Amazon_FPS_CBUIPipeline($pipelineName, $awsAccessKey, $awsSecretKey);
+  }
+
+  function setCBUIURL($CBUIURL) {
+    $this->CBUI_URL = $CBUIURL;
+  }
+
+  /**
+   * Adds any custom name value pair to the query string
+   *
+   * @param string $key    Key of the key-value pair in querystring
+   * @param string $value  Value of the key-value pair in querystring
+   */
+  public function addParameter($key, $value) {
+    $this->parameters[$key] = $value;
+  }
+
+  /**
+   * Adds all the parameters to existing parameters. 
+   *
+   * @param string $params    Optional parameters.
+   */
+  public function addOptionalParameters($params) {
+    foreach ($params as $key => $value) {
+      $this->parameters[$key] = $value;
+    }
+  }
+
+  protected function getHostHeader($endPoint) {
+    $url = parse_url($endPoint);
+    $host = $url['host'];
+    $scheme = strtoupper($url['scheme']);
+    if (isset($url['port'])) {
+      $port = $url['port'];
+      if (("HTTPS" == $scheme && $port != 443) ||  ("HTTP" == $scheme && $port != 80)) {
+        return strtolower($host) . ":" . $port;
+      }
+    }
+    return strtolower($host);
+  }
+
+  protected function getRequestURI($endPoint) {
+    $url = parse_url($endPoint);
+    $requestURI = $url['path'];
+    if (!isset($requestURI)) {
+      $requestURI = "/";
+    } else {
+      $requestURI = urlDecode($requestURI);
+    }
+    return $requestURI;
+  }
+
+  /**
+   * Construct the pipeline request url using given parameters. 
+   * Computes signature and adds it as additional parameter.
+   * @param parameters - Map of pipeline request parameters.
+   * @return Returns the pipeline request url. 
+   * @throws MalformedURLException
+   * @throws SignatureException
+   * @throws UnsupportedEncodingException
+   */
+  protected function constructUrl($parameters) {
+    if ($parameters == null) {
+      throw new Exception("Parameters can not be empty.");
+    }
+
+    $hostHeader = $this->getHostHeader($this->CBUI_URL);
+    $requestURI = $this->getRequestURI($this->CBUI_URL);
+
+    $signature = $this->signParameters($parameters, parent::HTTP_GET_METHOD, $hostHeader, $requestURI);
+    $parameters["signature"] = $signature;
+
+    $queryString = http_build_query($parameters, '', '&');
+
+    return $this->CBUI_URL . "?" . $queryString;
+  }
+
+  /**
+   * Constructs the query string for the parameters added to this class
+   *
+   * This function also calculates the signature of the all the name value pairs
+   * added to the class.
+   *
+   * @return string  URL 
+   */
+  public function getURL() {
+    $this->validateCommonMandatoryParameters($this->parameters);
+    $this->validateParameters($this->parameters);
+    return $this->constructUrl($this->parameters);
+  }
+
+  public function validateParameters($parameters) {
+
+  }
+}
+

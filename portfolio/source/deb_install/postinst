@@ -1,0 +1,28 @@
+#!/bin/sh
+
+# Source debconf library.
+. /usr/share/debconf/confmodule
+
+# Get subtenant id
+db_get p1cTools/subtenant_id
+subtenant_id=$RET
+
+# Get uid
+db_get p1cTools/uid
+uid=$RET
+
+# Get shared secret
+db_get p1cTools/shared_secret
+shared_secret=$RET
+
+# Make config file
+conf=$(printf "%s\n%s\n%s" "uid='$subtenant_id/$uid'" "secret='$shared_secret'" "host='https://cloudonestorage.peer1.com'")
+echo -n "$conf" > /etc/p1cTools.conf
+
+# Display complete message
+db_input critical p1cTools/setup_complete
+db_go
+
+# Cleanly exit
+db_stop
+

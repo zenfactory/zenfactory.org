@@ -1,0 +1,38 @@
+BEGIN;
+CREATE OR REPLACE FUNCTION set_lesson_order(INTEGER INTEGER) RETURNS BOOLEAN
+AS $save_ilo$
+	DECLARE
+		-- Lesson ID
+		lessonId ALIAS FOR $1;
+		-- New Position 
+		newPosition ALIAS FOR $2;
+		-- Section ID
+		sectionId INTEGER;
+		-- Current position 
+		currentPosition INTEGER;
+	BEGIN
+		-- Get Section ID
+		SELECT section_id INTO sectionId FROM lesson WHERE lesson_id = lessonId;
+
+		-- Get current position
+		SELECT lesson_order INTO currentPosition FROM lesson_order WHERE lesson_id = lessonId;
+
+		-- If it exists in the table 
+		IF currentPosition > 0 THEN
+			-- IF new position is past current position
+			IF currentPosition < newPosition THEN	
+				-- Shift all lessons between current position and new position down one 
+				UPDATE lesson_order SET lesson_order = lesson_order-1 WHERE lesson_id IN (SELECT id FROM lesson WHERE section_id = sectionId) AND (lesson_order > currentPosition AND lesson_order <= newPosition) AND lesson_id != lessonId;
+			-- If new position is before current position
+			ELSIF currentPosition > newPosition THEN
+				-- Shift all lessons at or below new position up one until the current position 
+				UPDATE lesson_order SET lesson_order = lesson_order+1 WHERE lesson_id IN (SELECT id FROM lesson WHERE section_id = sectionId) AND (lesson_order < currentPosition AND lesson_order >= newPosition) AND lesson_id != lessonId;	
+			END IF;
+			-- Set new position of lesson
+			UPDATE lesson_order SET lesson_order = newPosition WHERE lesson_id = lessonId;
+		ELSE
+		END IF;
+	RETURN TRUE; 
+	END;
+$set_lesson_order$ LANGUAGE plpgsql;
+COMMIT;

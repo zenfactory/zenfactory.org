@@ -1,0 +1,680 @@
+<?php
+
+/**
+ * @file
+ * Integrates various Amazon Payments payment services and Instant Payment Notifications
+ * (IPN) with Ubercart!
+ *
+ * You must configure your IPN URL according to the following format:
+ *   http[s]://example.com/uc_amazonpayments/ipn
+ *   (The module will tell the API to use this URL as well.)
+ *
+ * You can use http or https; https is recommended. Replace example.com with the
+ * real domain name of your site.
+ * If you have not yet signed up for your Amazon Payments account, please support
+ * Ubercart by using the following link.  Thank you!
+ *
+ * @todo: Figure out if a link can be placed here.
+ */
+
+define('UC_AMAZONPAYMENTS_DEFAULT_CHECKOUT_NOTICE', t('When you click Submit Order on the next screen, you will be directed to Amazon Payments for secure processing of your payment.'));
+
+/*******************************************************************************
+ * Hook Functions (Drupal)
+ ******************************************************************************/
+
+/**
+ * Implements hook_menu().
+ */
+function uc_amazonpayments_menu() {
+  // Always accessible, helps for testing while site is offline.
+  $items['uc_amazonpayments/ipn'] = array(
+    'title' => 'Amazon Payments IPN',
+    'page callback' => 'uc_amazonpayments_ipn',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'uc_amazonpayments.pages.inc',
+  );
+
+  // Callback functions for Flexible Payments Service.
+  $items['uc_amazonpayments/fps/complete/%uc_order'] = array(
+    'title' => 'Amazon Payments payment complete',
+    'page callback' => 'uc_amazonpayments_complete',
+    'page arguments' => array(3),
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+    'file' => 'uc_amazonpayments.pages.inc',
+  );
+  $items['uc_amazonpayments/fps/cancel'] = array(
+    'title' => 'Amazon Payments payment canceled',
+    'page callback' => 'uc_amazonpayments_cancel',
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+    'file' => 'uc_amazonpayments.pages.inc',
+  );
+
+  return $items;
+}
+
+/**
+ * Implements hook_init().
+ */
+function uc_amazonpayments_init() {
+  global $conf;
+  $conf['i18n_variables'][] = 'uc_amazonpayments_fps_checkout_button';
+}
+
+/**
+ * Implements hook_form_alter().
+ *
+ * Notice how we alter the checkout review form to post the order to Amazon Payments.
+ */
+/*function uc_amazonpayments_form_alter(&$form, $form_state, $form_id) {
+  if ($form_id == 'uc_cart_checkout_review_form' && ($order_id = intval($_SESSION['cart_order'])) > 0) {
+    $order = uc_order_load($order_id);
+
+    if ($order->payment_method == 'amazonpayments_fps') {
+
+      unset($form['submit']);
+      $form['#prefix'] = '<table style="display: inline; padding-top: 1em;"><tr><td>';
+      $form['#suffix'] = '</td><td>'. drupal_get_form('uc_amazonpayments_fps_form', $order) .'</td></tr></table>';
+    }
+  }
+}*/
+
+/*******************************************************************************
+ * Hook Functions (Ubercart)
+ ******************************************************************************/
+
+/**
+ * Implements hook_uc_payment_method().
+ */
+function uc_amazonpayments_uc_payment_method() {
+  $path = base_path() . drupal_get_path('module', 'uc_credit');
+  $title1 = '<img src="http://g-ecx.images-amazon.com/images/G/01/cba/b/s1.gif" style="position: relative; top: 5px; margin-right: 4px;" />';
+
+  if ($checkout_notice = _uc_amazonpayments_checkout_notice()) {
+    $title1 .= '<br />' . $checkout_notice;
+  }
+
+  $methods[] = array(
+    'id' => 'amazonpayments_fps',
+    'name' => t('Amazon Payments Flexible Payments Service'),
+    'title' => $title1,
+    'review' => t('Amazon Payments'),
+    'desc' => t('Redirect users to submit payments through Amazon Payments.'),
+    'callback' => 'uc_payment_method_amazonpayments_fps',
+    'redirect' => 'uc_amazonpayments_fps_form',
+    'weight' => 1,
+    'checkout' => FALSE,
+    'no_gateway' => TRUE,
+  );
+
+  return $methods;
+}
+
+/**
+ * Implements hook_checkout_pane_alter().
+ */
+function uc_amazonpayments_checkout_pane_alter(&$panes) {
+
+}
+
+
+/*******************************************************************************
+ * Callback Functions, Forms, and Tables
+ ******************************************************************************/
+
+/**
+ * Handles the Flexible Payments Service payment method.
+ */
+function uc_payment_method_amazonpayments_fps($op, &$order) {
+  switch ($op) {
+    case 'order-view':
+      $txn_id = db_query("SELECT txn_id FROM {uc_payment_amazonpayments_ipn} WHERE order_id = :id ORDER BY received ASC", array(':id' => $order->order_id))->fetchField();
+      if (empty($txn_id)) {
+        $txn_id = t('Unknown');
+      }
+      $build['#markup'] = t('Transaction ID:<br />@txn_id', array('@txn_id' => $txn_id));
+      return $build;
+
+    case 'settings':
+      $form['uc_amazonpayments_fps_email'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Amazon Payments e-mail address'),
+        '#description' => t('The e-mail address you use for the Amazon Payments account you want to receive payments.'),
+        '#default_value' => variable_get('uc_amazonpayments_fps_email', ''),
+      );
+      $form['uc_amazonpayments_fps_currency'] = array(
+        '#type' => 'select',
+        '#title' => t('Currency code'),
+        '#description' => t('Transactions can only be processed in one of the listed currencies.'),
+        '#options' => _uc_amazonpayments_currency_array(),
+        '#default_value' => variable_get('uc_amazonpayments_fps_currency', 'USD'),
+      );
+      $form['uc_amazonpayments_fps_language'] = array(
+        '#type' => 'select',
+        '#title' => t('Amazon Payments login page language'),
+        '#options' => drupal_map_assoc(array('AU', 'DE', 'FR', 'IT', 'GB', 'ES', 'US')),
+        '#default_value' => variable_get('uc_amazonpayments_fps_language', 'US'),
+      );
+      $form['uc_amazonpayments_fps_server'] = array(
+        '#type' => 'select',
+        '#title' => t('Amazon Payments server'),
+        '#description' => t('Sign up for and use a Sandbox account for testing.'),
+        '#options' => array(
+          'https://authorize.payments-sandbox.amazon.com/cobranded-ui/actions/start' => ('Sandbox'),
+          'https://authorize.payments.amazon.com/cobranded-ui/actions/start' => ('Live'),
+        ),
+        '#default_value' => variable_get('uc_amazonpayments_fps_server', 'https://authorize.payments-sandbox.amazon.com/cobranded-ui/actions/start'),
+      );
+      $form['uc_amazonpayments_fps_payment_action'] = array(
+        '#type' => 'select',
+        '#title' => t('Payment action'),
+        '#description' => t('"Complete sale" will authorize and capture the funds at the time the payment is processed.<br />"Authorization" will only reserve funds on the card to be captured later through your Amazon Payments account.'),
+        '#options' => array(
+          'Sale' => t('Complete sale'),
+          'Authorization' => t('Authorization'),
+        ),
+        '#default_value' => variable_get('uc_amazonpayments_fps_payment_action', 'Sale'),
+      );
+      $form['uc_amazonpayments_checkout_notice'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Redirect notice'),
+        '#description' => t('Enter a message to inform customers that they will
+          be redirected to Amazon Payments. If you do not want to show a message,
+          leave this field blank.'),
+        '#default_value' => variable_get('uc_amazonpayments_checkout_notice', UC_AMAZONPAYMENTS_DEFAULT_CHECKOUT_NOTICE),
+      );
+      $form['uc_amazonpayments_fps_checkout_button'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Order review submit button text'),
+        '#description' => t('Provide Amazon Payments FPS specific text for the submit button on the order review page.'),
+        '#default_value' => variable_get('uc_amazonpayments_fps_checkout_button', t('Submit Order')),
+      );
+      $form['uc_amazonpayments_fps_cancel_return_url'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Cancel return URL'),
+        '#description' => t('Specify the path customers who cancel their Amazon Payments FPS payment will be directed to when they return to your site.'),
+        '#default_value' => variable_get('uc_amazonpayments_fps_cancel_return_url', 'cart'),
+        '#size' => 32,
+        '#field_prefix' => url(NULL, array('absolute' => TRUE)) . (variable_get('clean_url', 0) ? '' : '?q='),
+      );
+      $form['uc_amazonpayments_fps_submit_method'] = array(
+        '#type' => 'radios',
+        '#title' => t('Amazon Payments cart submission method'),
+        '#description' => t('You must use a single line item on your site if you have any fees or discounts besides shipping and tax.'),
+        '#options' => array(
+          'single' => t('Submit the whole order as a single line item.'),
+          'itemized' => t('Submit an itemized order showing each product and description.'),
+        ),
+        '#default_value' => variable_get('uc_amazonpayments_fps_submit_method', 'single'),
+      );
+      $form['uc_amazonpayments_fps_no_shipping'] = array(
+        '#type' => 'radios',
+        '#title' => t('Shipping address prompt in Amazon Payments'),
+        '#options' => array(
+          '1' => t('Do not show shipping address prompt at Amazon Payments.'),
+          '0' => t('Prompt customer to include a shipping address.'),
+          '2' => t('Require customer to provide a shipping address.'),
+        ),
+        '#default_value' => variable_get('uc_amazonpayments_fps_no_shipping', '1'),
+      );
+      $form['uc_amazonpayments_fps_address_override'] = array(
+        '#type' => 'checkbox',
+        '#title' => t('Submit address information to Amazon Payments to override Amazon Payments stored addresses.'),
+        '#description' => t('Works best with the first option above.'),
+        '#default_value' => variable_get('uc_amazonpayments_fps_address_override', TRUE),
+      );
+      $form['uc_amazonpayments_fps_address_selection'] = array(
+        '#type' => 'radios',
+        '#title' => t('Sent address selection'),
+        '#options' => array(
+          'billing' => t('Send billing address to Amazon Payments.'),
+          'delivery' => t('Send shipping address to Amazon Payments.'),
+        ),
+        '#default_value' => variable_get('uc_amazonpayments_fps_address_selection', 'billing'),
+      );
+      $form['uc_amazonpayments_fps_debug_ipn'] = array(
+        '#type' => 'checkbox',
+        '#title' => t('Show debug info in the logs for Instant Payment Notifications.'),
+        '#default_value' => variable_get('uc_amazonpayments_fps_debug_ipn', FALSE),
+      );
+
+      return $form;
+  }
+}
+
+function _uc_amazonpayments_checkout_notice() {
+  return variable_get('uc_amazonpayments_checkout_notice', UC_AMAZONPAYMENTS_DEFAULT_CHECKOUT_NOTICE);
+}
+
+/*******************************************************************************
+ * Module and Helper Functions
+ ******************************************************************************/
+
+/**
+ * Returns the form elements for the Flexible Payments Service form.
+ */
+function uc_amazonpayments_fps_form($form, &$form_state, $order) {
+  $shipping = 0;
+  foreach ($order->line_items as $item) {
+    if ($item['type'] == 'shipping') {
+      $shipping += $item['amount'];
+    }
+  }
+
+  $tax = 0;
+  if (module_exists('uc_taxes')) {
+    foreach (uc_taxes_calculate($order) as $tax_item) {
+      $tax += $tax_item->amount;
+    }
+  }
+
+  $address = variable_get('uc_amazonpayments_fps_address_selection', 'billing');
+
+  $country = uc_get_country_data(array('country_id' => $order->{$address .'_country'}));
+  if ($country === FALSE) {
+    $country = array(0 => array('country_iso_code_2' => 'US'));
+  }
+
+  $phone = '';
+  for ($i = 0; $i < strlen($order->{$address .'_phone'}); $i++) {
+    if (is_numeric($order->{$address .'_phone'}[$i])) {
+      $phone .= $order->{$address .'_phone'}[$i];
+    }
+  }
+
+  /**
+   * night_phone_a: The area code for U.S. phone numbers, or the country code
+   *                for phone numbers outside the U.S.
+   * night_phone_b: The three-digit prefix for U.S. phone numbers, or the
+   *                entire phone number for phone numbers outside the U.S.,
+   *                excluding country code.
+   * night_phone_c: The four-digit phone number for U.S. phone numbers.
+   *                (Not Used for UK numbers)
+   */
+  if ($country[0]['country_iso_code_2'] == 'US' || $country[0]['country_iso_code_2'] == 'CA') {
+    $phone = substr($phone, -10);
+    $phone_a = substr($phone, 0, 3);
+    $phone_b = substr($phone, 3, 3);
+    $phone_c = substr($phone, 6, 4);
+  }
+  else {
+    $phone_a = $phone_b = $phone_c = '';
+  }
+
+  $data = array(
+    // Amazon Payments command variable
+    'cmd' => '_cart',
+
+    // Set the correct codepage
+    'charset' => 'utf-8',
+
+    // IPN control notify URL
+    'notify_url' => url('uc_amazonpayments/ipn/'. $order->order_id, array('absolute' => TRUE)),
+
+    // Display information
+    'cancel_return' => url('uc_amazonpayments/fps/cancel', array('absolute' => TRUE)),
+    'no_note' => 1,
+    'no_shipping' => variable_get('uc_amazonpayments_fps_no_shipping', 1),
+    'return' => url('uc_amazonpayments/fps/complete/'. $order->order_id, array('absolute' => TRUE)),
+    'rm' => 2,
+
+    // Transaction information
+    'currency_code' => variable_get('uc_amazonpayments_fps_currency', 'USD'),
+    'handling_cart' => uc_currency_format($shipping, FALSE, FALSE, '.'),
+    'order_id' => $order->order_id,
+    'callerReference' => $order->order_id .'-'. uc_cart_get_id(),
+    'tax_cart' => uc_currency_format($tax, FALSE, FALSE, '.'),
+
+    // Shopping cart specific variables
+    'business' => trim(variable_get('uc_amazonpayments_fps_email', '')),
+    'upload' => 1,
+
+    'lc' => variable_get('uc_amazonpayments_fps_language', 'US'),
+
+    // Prepopulating forms/address overriding
+    'address1' => substr($order->{$address .'_street1'}, 0, 100),
+    'address2' => substr($order->{$address .'_street2'}, 0, 100),
+    'city' => substr($order->{$address .'_city'}, 0, 40),
+    'country' => $country[0]['country_iso_code_2'],
+    'email' => $order->primary_email,
+    'first_name' => substr($order->{$address .'_first_name'}, 0, 32),
+    'last_name' => substr($order->{$address .'_last_name'}, 0, 64),
+    'state' => uc_get_zone_code($order->{$address .'_zone'}),
+    'zip' => $order->{$address .'_postal_code'},
+    'night_phone_a' => $phone_a,
+    'night_phone_b' => $phone_b,
+    'night_phone_c' => $phone_c,
+  );
+
+  if (variable_get('uc_amazonpayments_fps_address_override', TRUE)) {
+    $data['address_override'] = 1;
+  }
+
+  // Account for stores that just want to authorize funds instead of capture.
+  if (variable_get('uc_amazonpayments_fps_payment_action', 'Sale') == 'Authorization') {
+    $data['paymentaction'] = 'authorization';
+  }
+
+  if (variable_get('uc_amazonpayments_fps_submit_method', 'single') == 'itemized') {
+    // List individual items
+    $i = 0;
+    foreach ($order->products as $item) {
+      $i++;
+      $data['amount_' . $i] = uc_currency_format($item->price, FALSE, FALSE, '.');
+      $data['item_name_'. $i] = $item->title;
+      $data['item_number_'. $i] = $item->model;
+      $data['quantity_'. $i] = $item->qty;
+
+      // Amazon Payments will only display the first two...
+      if (!empty($item->data['attributes']) && count($item->data['attributes']) > 0) {
+        $o = 0;
+        foreach ($item->data['attributes'] as $name => $setting) {
+          $data['on'. $o .'_'. $i] = $name;
+          $data['os'. $o .'_'. $i] = implode(', ', (array)$setting);
+          $o++;
+        }
+      }
+    }
+
+    // Apply discounts (negative amount line items). For example, this handles line items created by uc_coupon.
+    $discount = 0;
+
+    foreach ($order->line_items as $item) {
+      if ($item['amount'] < 0) {
+        // The minus sign is not an error! The discount amount must be positive.
+        $discount -= $item['amount'];
+      }
+    }
+
+    if ($discount != 0) {
+      $data['discount_amount_cart'] = $discount;
+    }
+  }
+  else {
+    // List the whole cart as a single item to account for fees/discounts
+    $data['amount_1'] = uc_currency_format($order->order_total - $shipping - $tax, FALSE, FALSE, '.');
+    $data['item_name_1'] = t('Order @order_id at !store', array('@order_id' => $order->order_id, '!store' => variable_get('uc_store_name', url('<front>', array('absolute' => TRUE)))));
+    $data['on0_1'] = t('Product count');
+    $data['os0_1'] = count($order->products);
+  }
+
+  foreach ($data as $name => $value) {
+    if (!empty($value)) {
+      $form[$name] = array('#type' => 'value', '#value' => $value);
+    }
+  }
+
+  $form['actions'] = array('#type' => 'actions');
+  $form['actions']['submit'] = array(
+    '#type' => 'submit',
+    '#value' => variable_get('uc_amazonpayments_fps_checkout_button', t('Submit Order')),
+  );
+
+  $form['#submit'][] = 'uc_amazonpayments_checkout_review_form_submit';
+
+  return $form;
+}
+
+function uc_amazonpayments_checkout_review_form_submit($form, &$form_state) {
+  // Build the CBUI redirect URL
+  amazon_fps_include('cbui_single_use');
+  list($order_id,
+    $return_url,
+    $transaction_amount) = array(
+    $form_state['values']['callerReference'],
+    $form_state['values']['return'],
+    $form_state['values']['amount_1'],
+  );
+  $cbui = amazon_fps_cbui_single_use(array(
+    'caller_reference' => $order_id,
+    'return_url' => $return_url,
+    'transaction_amount' => $transaction_amount,
+    ),
+    array(
+      'currencyCode' => 'USD',
+      'paymentReason' => $form_state['values']['item_name_1'],
+    ),
+    TRUE, // The TRUE asks the function for the URL directly.
+    variable_get('uc_amazonpayments_fps_server',
+      'https://authorize.payments-sandbox.amazon.com/cobranded-ui/actions/start'));
+  // Set the form to go there at redirect time.
+  $form_state['redirect'] = $cbui;
+}
+
+/**
+ * Returns the description and subtotal of the products on an order.
+ */
+function _uc_amazonpayments_product_details($items) {
+  $desc = '';
+  $subtotal = 0;
+
+  if (!empty($items)) {
+    foreach ($items as $item) {
+      if (!empty($desc)) {
+        $desc .= ' / ';
+      }
+      $desc .= $item->qty .'x '. $item->title;
+      $subtotal += $item->qty * $item->price;
+    }
+  }
+
+  return array($desc, $subtotal);
+}
+
+/**
+ * Returns the Amazon Payments approved credit card type for a card number.
+ */
+function _uc_amazonpayments_card_type($cc_number) {
+  switch (substr(strval($cc_number), 0, 1)) {
+    case '3':
+      return 'Amex';
+    case '4':
+      return 'Visa';
+    case '5':
+      return 'MasterCard';
+    case '6':
+      return 'Discover';
+  }
+
+  return FALSE;
+}
+
+/**
+ * Turns Amazon Payments's NVP response to an API call into an associative array.
+ */
+function _uc_amazonpayments_nvp_to_array($nvpstr) {
+  foreach (explode('&', $nvpstr) as $nvp) {
+    list($key, $value) = explode('=', $nvp);
+    $nvp_array[urldecode($key)] = urldecode($value);
+  }
+
+  return $nvp_array;
+}
+
+/**
+ * Returns a human readable message for the AVS code.
+ */
+function _uc_amazonpayments_avscode_message($code) {
+  if (is_numeric($code)) {
+    switch ($code) {
+      case '0':
+        return t('All the address information matched.');
+      case '1':
+        return t('None of the address information matched; transaction declined.');
+      case '2':
+        return t('Part of the address information matched.');
+      case '3':
+        return t('The merchant did not provide AVS information. Not processed.');
+      case '4':
+        return t('Address not checked, or acquirer had no response. Service not available.');
+      case 'Null':
+      default:
+        return t('No AVS response was obtained.');
+    }
+  }
+
+  switch ($code) {
+    case 'A':
+    case 'B':
+      return t('Address matched; postal code did not');
+    case 'C':
+    case 'N':
+      return t('Nothing matched; transaction declined');
+    case 'D':
+    case 'F':
+    case 'X':
+    case 'Y':
+      return t('Address and postal code matched');
+    case 'E':
+      return t('Not allowed for MOTO transactions; transaction declined');
+    case 'G':
+      return t('Global unavailable');
+    case 'I':
+      return t('International unavailable');
+    case 'P':
+    case 'W':
+    case 'Z':
+      return t('Postal code matched; address did not');
+    case 'R':
+      return t('Retry for validation');
+    case 'S':
+      return t('Service not supported');
+    case 'U':
+      return t('Unavailable');
+    default:
+      return t('An unknown error occurred.');
+  }
+}
+
+/**
+ * Returns a human readable message for the CVV2 match code.
+ */
+function _uc_amazonpayments_cvvmatch_message($code) {
+  if (is_numeric($code)) {
+    switch ($code) {
+      case '0':
+        return t('Matched');
+      case '1':
+        return t('No match');
+      case '2':
+        return t('The merchant has not implemented CVV2 code handling.');
+      case '3':
+        return t('Merchant has indicated that CVV2 is not present on card.');
+      case '4':
+        return t('Service not available');
+      default:
+        return t('Unkown error');
+    }
+  }
+
+  switch ($code) {
+    case 'M':
+      return t('Match');
+    case 'N':
+      return t('No match');
+    case 'P':
+      return t('Not processed');
+    case 'S':
+      return t('Service not supported');
+    case 'U':
+      return t('Service not available');
+    case 'X':
+      return t('No response');
+    default:
+      return t('Not checked');
+  }
+}
+
+/**
+ * Return a message for the pending reason of an Amazon Payments payment.
+ */
+function _uc_amazonpayments_pending_message($reason) {
+  switch ($reason) {
+    case 'address':
+      return t('Customer did not include a confirmed shipping address per your address settings.');
+    case 'authorization':
+      return t('Waiting on you to capture the funds per your authorization settings.');
+    case 'echeck':
+      return t('eCheck has not yet cleared.');
+    case 'intl':
+      return t('You must manually accept or deny this international payment from your Account Overview.');
+    case 'multi-currency':
+      return t('You must manually accept or deny a payment of this currency from your Account Overview.');
+    case 'unilateral':
+      return t('Your e-mail address is not yet registered or confirmed.');
+    case 'upgrade':
+      return t('You must upgrade your account to Business or Premier status to receive credit card payments.');
+    case 'verify':
+      return t('You must verify your account before you can accept this payment.');
+    case 'other':
+    default:
+      return t('Reason unknown; contact Amazon Payments Customer Service for more information.');
+  }
+}
+
+/**
+ * Return a message for the reason code of an Amazon Payments reversal.
+ */
+function _uc_amazonpayments_reversal_message($reason) {
+  switch ($reason) {
+    case 'chargeback':
+      return t('The customer has initiated a chargeback.');
+    case 'guarantee':
+      return t('The customer triggered a money-back guarantee.');
+    case 'buyer-complaint':
+      return t('The customer filed a complaint about the transaction.');
+    case 'refund':
+      return t('You gave the customer a refund.');
+    case 'other':
+    default:
+      return t('Reason unknown; contact Amazon Payments Customer Service for more information.');
+  }
+}
+
+/**
+ * Returns an array of possible currency codes.
+ */
+function _uc_amazonpayments_currency_array() {
+  return drupal_map_assoc(array('AUD', 'BRL', 'CAD', 'CHF', 'CZK', 'DKK', 'EUR', 'GBP', 'HKD', 'HUF', 'ILS', 'JPY', 'MXN', 'MYR', 'NOK', 'NZD', 'PHP', 'PLN', 'SEK', 'SGD', 'THB', 'TWD', 'USD'));
+}
+
+/**
+ * Utility function that runs VerifySignature against the current
+ *   page and query string. This can be used for both returnUrl and
+ *   IPN verification.
+ */
+function uc_amazonpayments_verify_signature() {
+  // Just in case it's not loaded for some strange reason...
+  // _uc_amazonpayments_fps_api_url() is in there.
+  module_load_include('inc', 'uc_amazonpayments', 'uc_amazonpayments.pages');
+  amazon_fps_include('fps');
+  $service_url = _uc_amazonpayments_fps_api_url();
+  $fps_config = array('ServiceURL' => $service_url);
+  $request['UrlEndPoint'] = url(check_plain($_GET['q']), array('absolute' => TRUE));
+  $url_parts = parse_url(substr(request_uri(), 1));
+  if (isset($url_parts['query'])) {
+    $request['HttpParameters'] = $url_parts['query'];
+  }
+  else { // This is an IPN
+    // URL-encode all $_POST parameters, then compose them with http_build_query().
+    $request['HttpParameters'] = amazon_fps_encode_post();
+  }
+  $verifySignatureResponse = amazon_fps_fps_verify_signature($request, $fps_config);
+  // The Amazon FPS sandbox (at least) has a penchant for returning
+  // InvalidSignature errors instead of just saying that they didn't match.
+  // Since we catch this exception in amazon_fps_fps_verify_signature(),
+  // deal with the possibility it may have returned FALSE gracefully.
+  if (is_object($verifySignatureResponse)) {
+    $verifySignature = $verifySignatureResponse
+      ->getVerifySignatureResult()
+      ->getVerificationStatus(); // Method chaining FTW!
+  }
+  if ($verifySignature == 'Success') {
+    return TRUE;
+  }
+  return FALSE;
+}
+

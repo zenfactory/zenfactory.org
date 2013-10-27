@@ -1,0 +1,12 @@
+name = Amazon FPS library for PHP UI
+description = The Amazon FPS PHP library configuration UI.
+package = Libraries
+core = 7.x
+dependencies[] = amazon_fps
+
+; Information added by drupal.org packaging script on 2011-12-29
+version = "6.x-1.0-alpha3"
+core = "7.x"
+project = "amazon_fps"
+datestamp = "1325198737"
+

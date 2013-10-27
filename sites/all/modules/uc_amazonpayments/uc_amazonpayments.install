@@ -1,0 +1,152 @@
+<?php
+
+/**
+ * @file
+ * Installation file for Amazon Payments, primarily for the logging of IPNs.
+
+/**
+ * Implementation of hook_schema().
+ */
+function uc_amazonpayments_schema() {
+  $schema = array();
+
+  $schema['uc_payment_amazonpayments_ipn'] = array(
+    'description' => 'Logs Amazon Payments Instant Payment Notifications.',
+    'fields' => array(
+      'order_id' => array(
+        'description' => 'The order ID.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'txn_id' => array(
+        'description' => 'The transaction ID from Amazon Payments.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'txn_type' => array(
+        'description' => 'The transaction type from Amazon Payments.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'mc_gross' => array(
+        'description' => 'The payment amount from Amazon Payments.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'status' => array(
+        'description' => 'The IPN status from Amazon Payments.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'receiver_email' => array(
+        'description' => 'The e-mail address of the Amazon Payments account.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'payer_email' => array(
+        'description' => 'The e-mail address of the buyer.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'received' => array(
+        'description' => 'The IPN receipt timestamp.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'indexes' => array(
+      'order_id' => array('order_id'),
+    ),
+    'foreign keys' => array(
+      'order_id' => array('uc_orders' => 'order_id'),
+    ),
+  );
+
+  return $schema;
+}
+
+/**
+ * Implementation of hook_install().
+ */
+function uc_amazonpayments_install() {
+  $t = get_t();
+
+  db_merge('uc_order_statuses')
+    ->key(array('order_status_id' => 'amazonpayments_pending'))
+    ->insertFields(array(
+      'order_status_id' => 'amazonpayments_pending',
+      'title' => $t('Amazon Payments pending'),
+      'state' => 'payment_received',
+      'weight' => 7,
+      'locked' => 1,
+    ))
+    ->updateFields(array(
+      'state' => 'payment_received',
+      'locked' => 1,
+    ))
+    ->execute();
+}
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function uc_amazonpayments_uninstall() {
+  db_delete('variable')
+    ->condition('name', 'uc_amazonpayments_%', 'LIKE')
+    ->execute();
+}
+
+/**
+ * Implements hook_update_last_removed().
+ */
+function uc_amazonpayments_update_last_removed() {
+  // 7.x-1.0 and earlier were installed with schema version 0,
+  // which causes update.php to fail.
+  return drupal_get_installed_schema_version('uc_amazonpayments') == 0 ? 0 : 6000;
+}
+
+/*
+ * Removed completely unnecessary update 7000.
+ */
+
+/**
+ * Fix incorrect order status configuration.
+ */
+function uc_amazonpayments_update_7001() {
+  db_delete('uc_order_statuses')
+    ->condition('order_status_id', '')
+    ->execute();
+
+  db_merge('uc_order_statuses')
+    ->key(array('order_status_id' => 'amazonpayments_pending'))
+    ->insertFields(array(
+      'order_status_id' => 'amazonpayments_pending',
+      'title' => t('Amazon Payments pending'),
+      'state' => 'payment_received',
+      'weight' => 7,
+      'locked' => 1,
+    ))
+    ->updateFields(array(
+      'state' => 'payment_received',
+      'locked' => 1,
+    ))
+    ->execute();
+}
+
+

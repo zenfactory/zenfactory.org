@@ -1,0 +1,204 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+
+  <title>IPN and ReturnURL Validation Java Library</title>
+  <style type="text/css">
+    body, div, p, td, th {
+      font-family : helvetica,sans-serif, arial;
+      font-size : 12px;
+      color : #000000;
+    }
+
+    .aws-h1, h1{
+      font-family: verdana, arial, helvetica, sans-serif;
+      font-size: 18px;
+      font-weight: bold;
+      color: #000000;
+    }
+    .aws-h2, h2{
+      font-family: verdana, arial, helvetica, sans-serif;
+      font-size: 14px;
+      color: #c60;
+    }
+    .aws-h3, h3{
+      font-family: verdana, arial, helvetica, sans-serif;
+      font-size: 12px;
+      font-weight: bold;
+      color: #333333;
+    }
+
+    /*table ID selector styles*/
+    #aws-table {
+      border-top: 1px solid #cccccc;
+      border-left: 1px solid #cccccc;
+      width:95%;
+    }
+
+    #aws-table td{
+      font-size: 12px;
+      padding: 5px 5px 5px 5px;
+      border-bottom: 1px solid #cccccc;
+      border-right: 1px solid #cccccc;
+      vertical-align:top;
+    }
+
+    #aws-table th {
+      font-size: 12px;
+      padding: 5px 5px 5px 5px;
+      border-bottom: 1px solid #cccccc;
+      border-right: 1px solid #cccccc;
+      vertical-align:top;
+      background-color: #eeeeee;
+      color: #333333;
+      font-size: 12px;
+      font-weight: bold;
+      text-align: left;
+    }
+
+    /*code, note, and example styles*/
+    pre {
+      font-family: "Courier New", Courier, mono;
+      font-size: 12px;
+      margin-top: 5px;
+      margin-bottom: 5px;
+      color: #000066;
+      padding: 5px;
+      background-color: #eff7ff;
+      border: 1px dashed #333;
+      width:75%;
+      display:block;
+    }
+
+  </style>
+</head>
+<body>
+<h2>Introduction:</h2>
+  <p>Amazon FPS sends you outbound notifications in the form of GET and POST on your 
+    ReturnURL and IPN endpoints respectively. When you handle these notifications, we 
+    recommend you to validate the signature to ensure that the notification actually 
+    originated from us. You can validate the signature using signature version 2 with a 
+    <strong>server-side call to the VerifySignature API</strong>. In this call, you 
+    send the entire URL including the HTTP parameters received to FPS VerifySignature 
+    API and it will return a Boolean that indicates whether the signature was validated. 
+    Samples using this API to validate the signature are included in the 
+    src/com/amazonaws/ipnreturnurlvalidation folder. Their usage is described below.<br/> 
+    </p>
+<h2>Package Content</h2>
+
+<table id="aws-table">
+
+  <tbody>
+    <tr>
+      <th>Directory</th>
+      <th>Overview</th>
+    </tr>
+	<tr>
+      <td>
+	      src/Amazon/FPS
+      </td>
+      <td>
+        All sources including code samples that demonstrate making FPS calls.
+      </td>
+    </tr>
+    <tr>
+      <td>
+	      src/Amazon/IpnReturnUrlValidation
+      </td>
+      <td>
+        All sources including code samples that demonstrate validation of ipn and return url notifications.
+      </td>
+    </tr>
+  </tbody>
+
+</table>
+
+<section>
+  <h2>Verifying Incoming Signatures</h2>
+  <h3 id=pkiforreturnurl>Steps to validate Return URL</h3>
+       <ol type="i">
+	       <li>Go to src/Amazon/IpnReturnUrlValidation/Samples directory and open ReturnUrlVerificationSampleCode.php</li>
+            <li>In function <tt>test</tt>, replace/add the parameters you received at your return url and also update urlEndPoint to your return url end point.
+                <tt><pre>
+        $utils = new Amazon_FPS_SignatureUtilsForOutbound();
+        
+        //Parameters present in return url.
+        $params["expiry"] = "10/2013";
+        $params["tokenID"] = "Q5IG5ETFCEBU8KBLTI4JHINQVL6VAJVHICBRR49AKLPIEZH1KB1S8C7VHAJJMLJ3";
+        $params["status"] = "SC";
+        $params["callerReference"] = "1253247023946cMcrTRrjtLjNrZGNKchWfDtUEIGuJfiOBAAJYPjbytBV";
+        $params["signatureMethod"] = "RSA-SHA1";
+        $params["signatureVersion"] = "2";
+        $params["certificateUrl"] = "https://fps.amazonaws.com/certs/090909/PKICert.pem";
+        $params["signature"] = "H4NTAsp3YwAEiyQ86j5B53lksv2hwwEaEFxtdWFpy9xX764AZy/Dm0RLEykUUyPVLgqCOlMopay5"
+          . "Qxr/VDwhdYAzgQzA8VCV8x9Mn0caKsJT2HCU6tSLNa6bLwzg/ildCm2lHDho1Xt2yaBHMt+/Cn4q"
+          . "I5B+6PDrb8csuAWxW/mbUhk7AzazZMfQciJNjS5k+INlcvOOtQqoA/gVeBLsXK5jNsTh09cNa7pb"
+          . "gAvey+0DEjYnIRX+beJV6EMCPZxnXDGo0fA1PENLWXIHtAoIJAfLYEkVbT2lva2tZ0KBBWENnSjf"
+          . "26lMZVokypIo4huoGaZMp1IVkImFi3qC6ipCrw==";
+        
+        $urlEndPoint = "http://www.mysite.com/call_pay.jsp"; //Your return url end point. 
+        print "Verifying return url signed using signature v2 ....\n";
+        //return url is sent as a http GET request and hence we specify GET as the http method.
+        //Signature verification does not require your secret key
+        print "Is signature correct: " . $utils->validateRequest($params, $urlEndPoint, "GET") . "\n";
+                </pre></tt>
+            </li>
+	    <li>Run the sample and make sure the signature is valid.</li>
+</ol>
+
+    <h3 id=pkiforipn>Steps to validate IPN posts</h3>
+      <ol type="i">
+	       <li>Go to src/Amazon/IpnReturnUrlValidation/Samples directory and open IpnVerificationSampleCode.php</li>
+    <li>In function <tt>test</tt>, replace/add the parameters that you got in your IPN post. Also, set the urlEndPoint to your IPN end point.
+    <tt><pre>
+        $utils = new Amazon_FPS_SignatureUtilsForOutbound();
+        
+        //Parameters present in ipn.
+        $params["transactionId"] = "14DRG2JGR7LK4J54P544DKKNDLQFFZLE323";
+        $params["transactionDate"] = "1251832057";
+        $params["status"] = "INITIATED";
+        $params["notificationType"] = "TransactionStatus";
+        $params["callerReference"] = "callerReference=ReferenceStringJYI1251832057319108";
+        $params["operation"] = "PAY";
+        $params["transactionAmount"] = "USD 1.00";
+        $params["buyerName"] = "BuyerName-SsUo3oDjHx";
+        $params["paymentMethod"] = "CC";
+        $params["paymentReason"] = "DescriptionString-1251832057319108";
+        $params["recipientEmail"] = "recipientemail@amazon.com";
+        $params["signatureMethod"] = "RSA-SHA1";
+        $params["signatureVersion"] = "2";
+        $params["certificateUrl"] = "https://fps.amazonaws.com/certs/090909/PKICert.pem";
+        $params["signature"] = "vKXXCbtxvSkRR+Zn8YNW6DNGpbi474h2iM4L+xaOi16kYKdYpuGbvKyXQ36uTZTVHdUGAAcvpXFL"
+                . "wDfnTcqcckr2IUElrVJKQeT0WeWR+IqmABwSRGo+YqjzPNISSNXNzg6LFhouhUvmmwY15X3YgXfc"
+                . "ERN5IhPwv04YkyCLPCA9P0/QgD8Jum/hc9jj0HYjj3s3MuuQ3yoIhf2x+2CBZRm5lslRqnoF/8OJ"
+                . "1ZHmAHt9VvQSZ+QC3fwJgeqzJPAvtuOm930BP6hPYZVhXE5w7ByLt0qLk1ZFE/vzQ4io4vOyie6W"
+                . "bhp5+AuNyAs+QrGMYO8VZruZJfkZO4b6QOgV2A==";
+
+        $urlEndPoint = "http://www.mysite.com/ipn.jsp"; //Your url end point receiving the ipn.
+         
+        print "Verifying IPN signed using signature v2 ....\n";
+        //IPN is sent as a http POST request and hence we specify POST as the http method.
+        //Signature verification does not require your secret key
+        print "Is signature correct: " . $utils->validateRequest($params, $urlEndPoint, "POST") . "\n";
+    </pre></tt>
+    </li>
+    <li>Run the sample make sure the signature is valid.</li>
+</ol>
+
+<p>Summary of the steps to use Server side validation for Return URL and IPN:</p>
+      <table border="1" cellspacing="0" cellpadding="0" width="606">
+        <tr>
+          <td width="24"><p>1</p></td>
+          <td width="582"><p>Capture the notification on your IPN endpoint</p></td>
+        </tr>
+        <tr>
+          <td width="24"><p>2</p></td>
+          <td width="582"><p>Pass all the parameters to the validateRequest method of SignatureUtilsForOutbound</p></td>
+        </tr>
+        <tr>
+          <td width="24"><p>3</p></td>
+          <td width="582"><p>Capture the boolean returned by the validateRequest method and process the IPN or discard based on its value</p></td>
+        </tr>
+      </table>
+</body>
+</html>

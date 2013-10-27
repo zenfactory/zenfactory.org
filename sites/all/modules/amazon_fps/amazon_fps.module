@@ -1,0 +1,233 @@
+<?php
+/**
+ * @file
+ * Provides primary Drupal hook implementations.
+ *
+ * @author Kevin Kaland ("wizonesolutions", http://drupal.org/user/739994)
+ */
+
+define('AMAZON_FPS_LIBRARY_NAME', 'amazon-fps-2010-08-28-php5-library');
+
+/**
+ * Implementation of hook_init().
+ * Define AWS key constants.
+ */
+function amazon_fps_init() {
+  define('AWS_ACCESS_KEY_ID', variable_get('aws_key', ''));
+  define('AWS_SECRET_ACCESS_KEY', variable_get('aws_secret_key', ''));
+}
+
+/**
+ * Load specific include files based on which classes we need.
+ */
+function amazon_fps_include($load_option) {
+  static $include_path_set;
+  if ($include_path_set !== TRUE) {
+    // Set the include_path so library includes will work as well.
+    set_include_path(get_include_path() . PATH_SEPARATOR . realpath(libraries_get_path(AMAZON_FPS_LIBRARY_NAME) . '/src'));
+    $include_path_set = TRUE;
+  }
+  $load_options = _amazon_fps_paths();
+  if (isset($load_options[$load_option])) {
+    module_load_include('inc', 'amazon_fps', 'includes/' . $load_options[$load_option]);
+  }
+}
+
+/**
+ * Return module_load_include()-friendly paths to the main
+ *   module functionality segments.
+ */
+function _amazon_fps_paths() {
+  return array(
+    'fps' => 'amazon_fps.fps',
+    'cbui_edit_token' => 'amazon_fps.cbui_edit_token',
+    'cbui_multi_use' => 'amazon_fps.cbui_multi_use',
+    'cbui' => 'amazon_fps.cbui',
+    'cbui_recipient_token' => 'amazon_fps.cbui_recipient_token',
+    'cbui_recurring_token' => 'amazon_fps.cbui_recurring_token',
+    'cbui_single_use' => 'amazon_fps.cbui_single_use',
+  );
+}
+
+/**
+ * Initialize the environment needed for Amazon FPS cURL calls to work.
+ * Parameters are the same as _amazon_fps_chdir(). $reset also resets
+ *   the work done by this function.
+ * @see _amazon_fps_chdir
+ */
+function _amazon_fps_environment_set($reset = FALSE, $relative_path = 'src/Amazon/FPS/Model') {
+  _amazon_fps_set_separators($reset);
+  _amazon_fps_chdir($reset, $relative_path);
+}
+
+function _amazon_fps_set_separators($reset = FALSE) {
+  static $original_separator_input;
+  static $original_separator_output;
+  // Change arg_separator.input and arg_separator.output to conform to the library's expectations.
+  if ($reset && isset($original_separator_input) && isset($original_separator_output)) {
+    // Restore arg_separator.input and arg_separator.output to their original values.
+    ini_set('arg_separator.input', $original_separator_input);
+    ini_set('arg_separator.output', $original_separator_output);
+    $original_separator_input = $original_separator_output = NULL;
+    return;
+  }
+  if (!isset($original_separator_input)) {
+    $original_separator_input = ini_get('arg_separator.input');
+  }
+  if (!isset($original_separator_output)) {
+    $original_separator_output = ini_get('arg_separator.output');
+  }
+  ini_set('arg_separator.input', '&');
+  ini_set('arg_separator.output', '&');
+}
+
+/**
+ * Switch the PHP working directory to the library. Needed for cURL to work.
+ * @param $reset If set to TRUE, the original working directory will be restored.
+ * @param $relative_path The actual path within the library directory to which to change
+ *   HACK: It is set to src/Amazon/FPS/Model because the cURL call uses
+ *     '../../ca-bundle.crt' Therefore, it has to resolve to the 'src/Amazon' directory
+ *   for it to be found. It's stupid, because Client.php is within 'src/Amazon/FPS',
+ *   but I didn't write the library.
+ *   Also, you don't need to change this unless you know what you're doing.
+ */
+function _amazon_fps_chdir($reset = FALSE, $relative_path = 'src/Amazon/FPS/Model') {
+  static $original_directory;
+  if ($reset === TRUE && (!isset($original_directory) || (isset($original_directory) && $original_directory == getcwd()))) {
+    // No action needed; we never changed the directory.
+    $original_directory = NULL;
+    return;
+  }
+  if (!isset($original_directory) && $reset != TRUE) {
+    $original_directory = getcwd();
+    $new_directory = realpath(libraries_get_path(AMAZON_FPS_LIBRARY_NAME) . '/' . $relative_path);
+    chdir($new_directory);
+  }
+  elseif ($reset && isset($original_directory)) {
+    chdir($original_directory);
+    $original_directory = NULL;
+  }
+  else {
+    // No clue how they managed to get here, but best just to do nothing.
+    return;
+  }
+}
+
+/**
+ * Utility function that takes the current $_POST array and gets it ready
+ *   to be passed to VerifySignature as a URL-encoded parameter string.
+ */
+function amazon_fps_encode_post() {
+  // We need http_build_query() to use & and not &amp, so:
+  _amazon_fps_set_separators();
+  $encoded_string = http_build_query($_POST);
+  // Restore the separators to as they were before
+  _amazon_fps_set_separators(TRUE);
+  return $encoded_string;
+}
+
+/**
+ * Utility function to log a caught exception to watchdog.
+ * @param $exception Amazon_FPS_Exception The exception object
+ *   from the Amazon FPS API.
+ */
+function _amazon_fps_exception_log($exception, $method_name, $request, $config) {
+  watchdog('amazon_fps', '<h2><strong>Amazon FPS exception:</strong></h2>' .
+    '<p>Error message: !ErrorMessage<br />' .
+    'Status code: !StatusCode<br />' .
+    'Error code: !ErrorCode<br />' .
+    'Error type: !ErrorType<br />' .
+    'Request ID: !RequestId<br />' .
+    'Raw XML response: !XML</p>' .
+    '<h2><strong>amazon_fps_invoke() function information</strong></h2>' .
+    '<p>Method name: !method_name<br />' .
+    'Request array:<br />
+      <pre>!request</pre><br />' .
+    'Configuration array:<br />
+      <pre>!config</pre></p>',
+    array(
+      '!ErrorMessage' => $exception->getErrorMessage(),
+      '!StatusCode' => $exception->getStatusCode(),
+      '!ErrorCode' => $exception->getErrorCode(),
+      '!ErrorType' => $exception->getErrorType(),
+      '!RequestId' => $exception->getRequestId(),
+      '!XML' => $exception->getXML(),
+      '!method_name' => $method_name,
+      '!request' => print_r($request, TRUE),
+      '!config' => print_r($config, TRUE),
+    ),
+    WATCHDOG_ERROR);
+}
+
+/**
+ * Implements hook_libraries_info().
+ * Currently does nothing, but left intact for future use.
+ */
+function amazon_fps_libraries_info() {
+  return array(
+    'amazon_fps' => array(
+      'title' => 'AWS SDK for PHP',
+      'vendor url' => 'http://aws.amazon.com/sdkforphp/',
+      'download url' => 'http://aws.amazon.com/sdkforphp/',
+      'version arguments' => array(
+        'file' => 'sdk.class.php',
+        'pattern' => "/define\('CFRUNTIME_VERSION', '(\d+\.\d+(\.\d+)?)'\);/",
+        'lines' => 200,
+      ),
+      'files' => array(
+        'php' => array(
+          'sdk.class.php',
+        ),
+      ),
+      'integration files' => array(
+        'amazon_fps' => array(
+          'php' => array(
+            'config.inc',
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+/**
+ * Implements hook_requirements()
+ * @todo: Simplify just to check for existence of installed library.
+ */
+/* function amazon_fps_requirements() {
+  $t = get_t();
+  $requirements = array();
+
+  $info = libraries_load('amazon_fps');
+  if (!$info['loaded']) {
+    $requirements['amazon_fps'] = array(
+      'severity' => REQUIREMENT_ERROR,
+      'title' => $t('AWSSDK'),
+      'value' => $t('Failed to load the AWSSDK'),
+      'description' => $t('Please make sure the AWSSDK library is installed in the libraries directory. Use the drush make file for easy installation.'),
+    );
+  }
+  else {
+    global $base_url;
+    $requirements['amazon_fps'] = array(
+      'severity' => REQUIREMENT_OK,
+      'title' => $t('AWSSDK'),
+      'value' => $info['version'] . ' [' . l(t('compatibility test'), 'admin/reports/amazon_fps') . ']',
+    );
+
+    // Instead of calling the CLI script in a separate process to check for
+    // compatibility load the capatiblity test in the same process to ensure it
+    // uses the same configuration as Drupal.
+    ob_start();
+    include $info['library path'] . '/_compatibility_test/sdk_compatibility_test_cli.php';
+    $compatible = strpos(ob_get_clean(), 'Bottom Line: Yes, you can!') !== FALSE;
+
+    if (!$compatible) {
+      $requirements['amazon_fps']['severity'] = REQUIREMENT_ERROR;
+      $requirements['amazon_fps']['description'] = $t('Your PHP environment does not support the minimum requirements for the AWS SDK for PHP.');
+    }
+  }
+
+  return $requirements;
+} */
+

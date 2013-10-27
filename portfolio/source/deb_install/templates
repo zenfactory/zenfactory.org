@@ -1,0 +1,18 @@
+Template: p1cTools/subtenant_id
+Type: string
+Description: Please enter your subtenant ID:
+	This package needs to know what your subtenant ID is. You can find this in the Peer1 Hosting Customer portal, or in your welcome letter after you signed up for cloud storage.
+
+Template: p1cTools/uid
+Type: string
+Description: Please enter your UID:
+	This package needs to know what your UID is. This can be found in the Peer1 Hosting Customer Portal, or in the welcome letter sent after you signed up for cloud storage.
+
+Template: p1cTools/shared_secret
+Type: password 
+Description: Please enter your shared secret:
+	This package needs to know what your shared secret is. This can be found in the Peer1 Hosting Customer Portal, or in the welcome letter sent after you signed up for cloud storage.
+
+Template: p1cTools/setup_complete
+Type: text 
+Description: Setup is complete. Please use "man p1cTools" for usage information:

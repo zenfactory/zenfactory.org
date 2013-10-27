@@ -1,0 +1,9 @@
+Package: p1cTools 
+Version: 0.1 
+Section: web 
+Priority: optional
+Maintainer: Hassan Shirani <hshirani@peer1.com>
+Architecture: all
+Depends: openssl (>= 0.9), coreutils (>= 6.10), curl (>= 7.18)
+Pre-Depends: debconf (>= 0.2.17) 
+Description: Peer1 Hosting Cloud Tools -- This package installs three utilities to enable an end user to upload, download, and list files in their personal cloud storage account at Peer1 Hosting.

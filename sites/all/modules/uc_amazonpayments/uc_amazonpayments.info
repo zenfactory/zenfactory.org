@@ -1,0 +1,17 @@
+name = Ubercart Amazon Payments
+description = Integrates various Amazon Payments services (currently just Flexible Payments).
+dependencies[] = uc_payment
+dependencies[] = amazon_fps
+package = Ubercart - payment
+core = 7.x
+php = 5.2
+version = "7.x-1.0"
+core = "7.x"
+project = "uc_amazonpayments"
+datestamp = "1360922940"
+; Information added by drupal.org packaging script on 2013-02-17
+version = "7.x-1.0"
+core = "7.x"
+project = "uc_amazonpayments"
+datestamp = "1361144238"
+

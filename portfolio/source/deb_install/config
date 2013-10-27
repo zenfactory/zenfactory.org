@@ -1,0 +1,16 @@
+#!/bin/sh 
+
+# Source debconf library.
+. /usr/share/debconf/confmodule
+
+# Get Environment
+db_input critical p1cTools/subtenant_id
+db_go
+
+# Get SVN User
+db_input critical p1cTools/uid
+db_go
+
+# Get SVN Pass
+db_input critical p1cTools/shared_secret
+db_go

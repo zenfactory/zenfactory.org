@@ -1,0 +1,30 @@
+<?php
+module_load_include('class', 'amazon_fps', 'classes/Amazon_FPS_CBUIPipeline_Drupal');
+class Amazon_FPS_CBUISingleUsePipeline_Drupal extends Amazon_FPS_CBUIPipeline_Drupal {
+  // Based on Amazon_FPS_CBUISingleUsePipeline 2010-08-28
+
+  /**
+   * @param string $accessKeyId    Amazon Web Services Access Key ID.
+   * @param string $secretAccessKey   Amazon Web Services Secret Access Key.
+   */
+  function Amazon_FPS_CBUISingleUsePipeline_Drupal($awsAccessKey, $awsSecretKey) {
+    parent::Amazon_FPS_CBUIPipeline_Drupal("SingleUse", $awsAccessKey, $awsSecretKey);
+  }
+
+  /**
+   * Set mandatory parameters required for single use token pipeline.
+   */
+  function setMandatoryParameters($callerReference, $returnUrl, $transactionAmount) {
+    $this->addParameter("callerReference", $callerReference);
+    $this->addParameter("returnURL", $returnUrl);
+    $this->addParameter("transactionAmount", $transactionAmount);
+  }
+
+  function validateParameters($parameters) {
+    //mandatory parameters for single use pipeline
+    if (!isset($parameters["transactionAmount"])) {
+      throw new Exception("transactionAmount is missing in parameters.");
+    }
+  }
+}
+
